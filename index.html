@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Websockets Client</title>
+    <link href="style.css" rel="stylesheet">
+    <link href="https://unpkg.com/vue-simple-notify/dist/vue-simple-notify.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script>
+    <script src="https://unpkg.com/vue-simple-notify/dist/vue-simple-notify.min.js"></script>
+    <script src="socket.io.js"></script>
+</head>
+<body>
+    <main id="v-app">
+        <section class="alerts">
+            <alerts-component :items="alerts"></alerts-component>
+        </section>
+
+        <section v-if="user" class="chat">
+            <h1>Websockets Tester {{ user.firstname }} {{ user.lastname }}</h1>
+            <form>
+                <input v-model="text" @keypress="sendTypingEvent('press')" @keyup="sendTypingEvent('up')" type="text"/>
+                <button type="submit" @click.prevent="sendChatMessage()">Send</button>
+            </form>
+            <!-- Tabs -->
+            <em>{{ typingMessage }}</em>
+            <div class="tab-row">
+                <button class="tab-btn" :class="{ active: activeRoom == 'general' }" @click="activeRoom = 'general'">General</button>
+                <button class="tab-btn" :class="{ active: activeRoom == '366f3d60-e595-46bc-9822-bc87181c3633' }" @click="activeRoom = '366f3d60-e595-46bc-9822-bc87181c3633'">TypeScript</button>
+                <button class="tab-btn" :class="{ active: activeRoom == 'nestjs' }" @click="activeRoom = 'nestjs'">NestJS</button>
+            </div>
+            <div class="tab-row">
+                Status: {{ isMemberOfActiveRoom ? 'Joined' : 'NOT Joined' }} <button @click="toggleRoomMembership()">{{ isMemberOfActiveRoom ? 'Leave' : 'Join' }}</button>
+            </div>
+            <p>
+                <ul>
+                    <li v-for="msg of messages[activeRoom]">
+                        <strong>{{ msg.sender.firstname }}:</strong> {{ msg.text }}
+                    </li>
+                </ul>
+            </p>
+            <!-- /Tabs -->
+        </section>
+    </main>
+    <script>
+        Vue.component('alerts-component', VueSimpleNotify.VueSimpleNotify);
+        var app = new Vue({
+            el: '#v-app',
+            data: {
+                user: undefined,
+                text: '',
+                typingMessage: '...',
+                messages: {
+                    general: [],
+                    '366f3d60-e595-46bc-9822-bc87181c3633': [],
+                    nestjs: []
+                },
+                socket: { chat: null, alerts: null },
+                alerts: [],
+                activeRoom: 'general',
+                rooms: {
+                    general: false,
+                    typescript: false,
+                    nestjs: false
+                }
+            },
+            methods: {
+                sendTypingEvent(type) {
+                    const payload = { user: this.user.uid, conversation: this.activeRoom }
+                    if(type === "press"){
+                       this.socket.chat.emit('event::conversation::typing', payload)
+                    }else {
+                        this.socket.chat.emit('event::conversation::type-end', payload)
+                    }
+                    // this.socket.chat.emit('typing', { sender: this.user.uid, room: this.activeRoom })
+                },
+                setTyping(who, value = "is typing...") {
+                    if(!value) return this.typingMessage = ""
+                    this.typingMessage = `${who} ${value}`;
+                    setTimeout(() => this.typingMessage = "", 2000)
+                },
+                async sendChatMessage() {
+                    if (this.isMemberOfActiveRoom) {
+                        // this.socket.chat.emit('chatToServer', { sender: this.username, room: this.activeRoom, message: this.text });
+                        fetch(`http://localhost:5000/conversation/${this.activeRoom}/messages`, {
+                            method: "POST",
+                            headers: {
+                                'Access-Control-Allow-Origin': "*",
+                                'Content-Type': 'application/json',
+                                'Authorization': "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjNhMjIzMDdiLTI1NTMtNGZjMS1iMTQzLWExMzcwNmFhMjRhNCIsImlhdCI6MTYyMzg2NDYwOSwiZXhwIjoxNjI0NjQyMjA5fQ.9U6Fvjwocd4_uyrRNFH9c_FfcB5XhrpN--j-g3vqoK8"
+                            },
+                            body: JSON.stringify({
+                                text: this.text
+                            })
+                        })
+                        this.text = "";
+                    } else {
+                        alert('You must join the room before sending messages!');
+                    }
+                },
+                receiveChatMessage(msg) {
+                    this.messages[msg.conversation].push(msg);
+                },
+                receiveAlertMessage(msg) {
+                    this.alerts.push(msg);
+                },
+                toggleRoomMembership() {
+                    console.log(this.activeRoom)
+                    if (this.isMemberOfActiveRoom) {
+                        console.log('dsafdsa')
+                        this.socket.chat.emit('event::conversation::leave-conversation', {conversation: this.activeRoom, userId: this.user.uid }, (payload) => {
+                            if(payload.status === "fail") return this.alerts.push({ type: 'Alert', message: "Something went wrong"})
+                            console.log('leaving group now: ', payload)
+                            this.rooms[payload.payload.conversation] = false;
+                        });
+                    } else {
+                        this.socket.chat.emit('event::conversation::join-conversation', this.activeRoom);
+                    }
+                }
+            },
+            computed: {
+                isMemberOfActiveRoom() {
+                    console.log(this.rooms, this.activeRoom, this.rooms[this.activeRoom])
+                    return this.rooms[this.activeRoom];
+                }, // f23f176d-3ca2-4f60-842b-819884167edc
+            },
+            created() {
+                this.socket.chat = io('http://localhost:5000/conversation');
+                const _this = this;
+                const a = () => {
+                    // 3a22307b-2553-4fc1-b143-a13706aa24a4
+                    const userID = prompt('Enter your user ID:');
+                    this.socket.chat.emit('event::conversation::login', userID, function (res) { 
+                        console.log('user: ', res.payload)
+                        if(res.status === "fail") return a(); 
+                        console.log(res.payload)
+                        _this.user = res.payload
+                    })
+                    return;
+                }
+                a()
+
+                // const userID = prompt('Enter your user ID:');
+                // this.socket.chat.emit('event::conversation::login', userID, (res) => { 
+                //     console.log('userr  : ', res.payload)
+                //     if(res.status === "fail") return a(); 
+                    
+                //     _this.user = res.payload
+                // })
+
+                this.socket.chat.on('event::conversation::new-message', (msg) => {
+                    console.log(msg)
+                    this.receiveChatMessage(msg);
+                });
+                this.socket.chat.on('connect', () => {
+                    this.toggleRoomMembership();
+                });
+                this.socket.chat.on('event::conversation::join-conversation', (payload) => {
+                    this.rooms[payload.conversation] = true;
+                });
+                this.socket.chat.on('event::conversation::typing', (payload) => {
+                    console.log(`${payload.firstname} is typing...`)
+                    this.setTyping(payload.firstname)
+                }); 
+                this.socket.chat.on('event::conversation::type-end', (payload) => {
+                    console.log(`${payload.firstname} is typing...`)
+                    this.setTyping(payload.firstname, undefined)
+                });
+                this.socket.chat.on('event::conversation::leave-conversation', (payload) => {
+                    this.receiveChatMessage({ conversation: payload.conversation, sender: { firstname: 'System', lastname: 'SOme', uid: 'd'}, text: `${payload.firstname} left`})
+                });
+
+                this.socket.alerts = io('http://localhost:5000/alert');
+                this.socket.alerts.on('alertToClient', (msg) => {
+                    this.receiveAlertMessage(msg);
+                });
+
+                this.socket.chat.on('event::conversation::login', (user) => {
+                    console.log(`${user.firstname} ${user.lastname} is online`)
+                })
+            }
+        });
+    
+    </script>
+</body>
+</html>
